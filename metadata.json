@@ -1,0 +1,6 @@
+{
+  "name": "Mobile After Effects Intro Editor",
+  "description": "Touch-optimized motion graphics and SVG intro video editing suite with multi-layer keyframe timeline, shape builder, audio waveforms, transitions, and MP4/WebM video rendering.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
