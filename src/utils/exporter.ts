@@ -12,17 +12,25 @@ export async function renderProjectToVideo(
   onProgress?: ExportProgressCallback
 ): Promise<Blob> {
   return new Promise(async (resolve, reject) => {
+    let exportCanvas: HTMLCanvasElement | null = null;
+    let ctx: CanvasRenderingContext2D | null = null;
+    let recorder: MediaRecorder | null = null;
+
     try {
-      const exportCanvas = document.createElement('canvas');
-      exportCanvas.width = canvasWidth;
-      exportCanvas.height = canvasHeight;
-      const ctx = exportCanvas.getContext('2d');
+      // Clamp canvas dimensions to safe max limit (max 2560px) to prevent GPU allocation crashes
+      const safeWidth = Math.min(canvasWidth, 2560);
+      const safeHeight = Math.min(canvasHeight, 2560);
+
+      exportCanvas = document.createElement('canvas');
+      exportCanvas.width = safeWidth;
+      exportCanvas.height = safeHeight;
+      ctx = exportCanvas.getContext('2d', { alpha: false, willReadFrequently: false });
 
       if (!ctx) {
         throw new Error('Canvas 2D context unavailable');
       }
 
-      // Check supported MIME types
+      // Select optimal supported MIME type
       let mimeType = 'video/webm';
       if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1.42E01E')) {
         mimeType = 'video/mp4;codecs=avc1.42E01E';
@@ -30,12 +38,26 @@ export async function renderProjectToVideo(
         mimeType = 'video/mp4';
       } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
         mimeType = 'video/webm;codecs=vp9';
+      } else if (MediaRecorder.isTypeSupported('video/webm')) {
+        mimeType = 'video/webm';
+      }
+
+      // Tune bitrate according to resolution to avoid memory overflow
+      let videoBitsPerSecond = 3000000; // Default 3 Mbps
+      if (safeWidth <= 854) {
+        videoBitsPerSecond = 1500000; // 1.5 Mbps for 480p
+      } else if (safeWidth <= 1280) {
+        videoBitsPerSecond = 3000000; // 3 Mbps for 720p
+      } else if (safeWidth <= 1920) {
+        videoBitsPerSecond = 5000000; // 5 Mbps for 1080p
+      } else {
+        videoBitsPerSecond = 8000000; // 8 Mbps max
       }
 
       const stream = exportCanvas.captureStream(project.fps);
-      const recorder = new MediaRecorder(stream, {
+      recorder = new MediaRecorder(stream, {
         mimeType,
-        videoBitsPerSecond: 8000000, // 8 Mbps high quality
+        videoBitsPerSecond,
       });
 
       const chunks: Blob[] = [];
@@ -43,15 +65,27 @@ export async function renderProjectToVideo(
         if (e.data && e.data.size > 0) chunks.push(e.data);
       };
 
+      recorder.onerror = (err) => {
+        reject(new Error('MediaRecorder error: ' + String(err)));
+      };
+
       recorder.onstop = () => {
-        const finalBlob = new Blob(chunks, { type: mimeType });
-        resolve(finalBlob);
+        try {
+          const finalBlob = new Blob(chunks, { type: mimeType });
+          // Cleanup canvas memory
+          if (exportCanvas) {
+            exportCanvas.width = 1;
+            exportCanvas.height = 1;
+          }
+          resolve(finalBlob);
+        } catch (e) {
+          reject(e);
+        }
       };
 
       recorder.start();
 
       const totalFrames = Math.floor(project.duration * project.fps);
-      const frameDurationMs = 1000 / project.fps;
 
       for (let frame = 0; frame <= totalFrames; frame++) {
         const currentTime = frame / project.fps;
@@ -61,21 +95,30 @@ export async function renderProjectToVideo(
           onProgress(percent, `Rendering frame ${frame} / ${totalFrames} (${currentTime.toFixed(2)}s)...`);
         }
 
-        // Draw Canvas Frame
-        await renderFrameToCanvas(ctx, project, currentTime, canvasWidth, canvasHeight);
+        // Render Frame
+        await renderFrameToCanvas(ctx, project, currentTime, safeWidth, safeHeight);
 
-        // Allow browser frame tick
-        await new Promise((r) => setTimeout(r, frameDurationMs));
+        // Yield thread execution so browser doesn't freeze/crash
+        if (frame % 3 === 0) {
+          await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 10)));
+        } else {
+          await new Promise((r) => setTimeout(r, 8));
+        }
       }
 
-      recorder.stop();
+      if (recorder.state !== 'inactive') {
+        recorder.stop();
+      }
     } catch (err) {
+      if (recorder && recorder.state !== 'inactive') {
+        try { recorder.stop(); } catch (_) {}
+      }
       reject(err);
     }
   });
 }
 
-// Draw a single frame at currentTime to canvas
+// Draw a single frame at currentTime to canvas safely
 export async function renderFrameToCanvas(
   ctx: CanvasRenderingContext2D,
   project: Project,
@@ -88,22 +131,14 @@ export async function renderFrameToCanvas(
 
   // 1. Draw Background
   ctx.save();
-  ctx.clearRect(0, 0, width, height);
-
-  if (project.backgroundGradient) {
-    // Fill with gradient or fallback bg
-    ctx.fillStyle = project.backgroundColor || '#000000';
-    ctx.fillRect(0, 0, width, height);
-  } else {
-    ctx.fillStyle = project.backgroundColor || '#0a0a0f';
-    ctx.fillRect(0, 0, width, height);
-  }
+  ctx.fillStyle = project.backgroundColor || '#0a0a0f';
+  ctx.fillRect(0, 0, width, height);
 
   // Draw Background Pattern
   if (project.bgPattern === 'grid') {
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-    ctx.lineWidth = 1;
-    const gridSize = 40;
+    ctx.lineWidth = Math.max(1, Math.round(width / 1000));
+    const gridSize = Math.max(20, Math.round(width / 30));
     for (let x = 0; x < width; x += gridSize) {
       ctx.beginPath();
       ctx.moveTo(x, 0);
@@ -118,7 +153,7 @@ export async function renderFrameToCanvas(
     }
   } else if (project.bgPattern === 'dots') {
     ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-    const dotSpacing = 30;
+    const dotSpacing = Math.max(20, Math.round(width / 30));
     for (let x = 15; x < width; x += dotSpacing) {
       for (let y = 15; y < height; y += dotSpacing) {
         ctx.beginPath();
@@ -142,14 +177,15 @@ export async function renderFrameToCanvas(
     ctx.save();
     ctx.globalAlpha = props.opacity;
 
-    // Apply Glow Filter
+    // Apply Glow Filter safely without exceeding GPU memory
     if (props.glowRadius && props.glowRadius > 0) {
       ctx.shadowColor = props.glowColor || props.fill || '#00f0ff';
-      ctx.shadowBlur = props.glowRadius;
+      // Cap glowRadius to max 20px so Gaussian blur calculation doesn't freeze browser
+      ctx.shadowBlur = Math.min(props.glowRadius, 20);
     }
 
     if (props.blur && props.blur > 0) {
-      ctx.filter = `blur(${props.blur}px)`;
+      ctx.filter = `blur(${Math.min(props.blur, 10)}px)`;
     }
 
     // Blend mode
@@ -183,13 +219,17 @@ export async function renderFrameToCanvas(
         // Trim Path stroke offset simulation
         if (props.trimStart > 0 || props.trimEnd < 1) {
           const trim = getTrimPathStyle(props.trimStart, props.trimEnd, 800);
-          ctx.setLineDash([
-            parseFloat(trim.strokeDasharray.split(' ')[0]),
-            parseFloat(trim.strokeDasharray.split(' ')[1]),
-          ]);
-          ctx.lineDashOffset = trim.strokeDashoffset;
+          const dash1 = parseFloat(trim.strokeDasharray.split(' ')[0]) || 0;
+          const dash2 = parseFloat(trim.strokeDasharray.split(' ')[1]) || 0;
+          if (dash1 > 0 || dash2 > 0) {
+            ctx.setLineDash([dash1, dash2]);
+            ctx.lineDashOffset = trim.strokeDashoffset;
+          }
         } else if (props.strokeDasharray) {
-          ctx.setLineDash(props.strokeDasharray.split(' ').map(Number));
+          const dashes = props.strokeDasharray.split(' ').map(Number).filter((n) => !isNaN(n));
+          if (dashes.length > 0) {
+            ctx.setLineDash(dashes);
+          }
         }
 
         ctx.stroke(p);

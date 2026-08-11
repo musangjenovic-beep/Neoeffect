@@ -10,7 +10,7 @@ interface ExportModalProps {
 }
 
 export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, project }) => {
-  const [resolution, setResolution] = useState<'1080p' | '720p' | '4k'>('1080p');
+  const [resolution, setResolution] = useState<'480p' | '720p' | '1080p' | '4k'>('720p');
   const [isRendering, setIsRendering] = useState(false);
   const [progress, setProgress] = useState(0);
   const [progressMsg, setProgressMsg] = useState('');
@@ -24,18 +24,19 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, proje
     setProgressMsg('Initializing Canvas frame renderer...');
     setVideoUrl(null);
 
-    let width = 1920;
-    let height = 1080;
+    let width = 1280;
+    let height = 720;
 
     if (project.aspectRatio === '9:16') {
-      width = resolution === '4k' ? 2160 : resolution === '1080p' ? 1080 : 720;
-      height = resolution === '4k' ? 3840 : resolution === '1080p' ? 1920 : 1280;
+      width = resolution === '4k' ? 1440 : resolution === '1080p' ? 1080 : resolution === '720p' ? 720 : 480;
+      height = resolution === '4k' ? 2560 : resolution === '1080p' ? 1920 : resolution === '720p' ? 1280 : 854;
     } else if (project.aspectRatio === '1:1') {
-      width = resolution === '4k' ? 2160 : resolution === '1080p' ? 1080 : 720;
+      width = resolution === '4k' ? 1920 : resolution === '1080p' ? 1080 : resolution === '720p' ? 720 : 480;
       height = width;
     } else {
-      width = resolution === '4k' ? 3840 : resolution === '1080p' ? 1920 : 1280;
-      height = resolution === '4k' ? 2160 : resolution === '1080p' ? 1080 : 720;
+      // 16:9
+      width = resolution === '4k' ? 2560 : resolution === '1080p' ? 1920 : resolution === '720p' ? 1280 : 854;
+      height = resolution === '4k' ? 1440 : resolution === '1080p' ? 1080 : resolution === '720p' ? 720 : 480;
     }
 
     try {
@@ -78,30 +79,45 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose, proje
             <>
               <div>
                 <label className="text-slate-300 text-xs font-semibold block mb-1">Select Output Resolution:</label>
-                <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                  <button
+                    onClick={() => setResolution('480p')}
+                    className={`py-2 px-1 rounded-xl font-bold border transition-all text-center ${
+                      resolution === '480p' ? 'bg-cyan-500/20 text-cyan-400 border-cyan-400' : 'bg-slate-950 text-slate-400 border-slate-800'
+                    }`}
+                  >
+                    480p SD
+                    <span className="block text-[9px] font-normal text-emerald-400">Fast / Mobile</span>
+                  </button>
+
                   <button
                     onClick={() => setResolution('720p')}
-                    className={`py-2 rounded-xl font-bold border transition-all ${
+                    className={`py-2 px-1 rounded-xl font-bold border transition-all text-center ${
                       resolution === '720p' ? 'bg-cyan-500/20 text-cyan-400 border-cyan-400' : 'bg-slate-950 text-slate-400 border-slate-800'
                     }`}
                   >
                     720p HD
+                    <span className="block text-[9px] font-normal text-slate-400">Standard</span>
                   </button>
+
                   <button
                     onClick={() => setResolution('1080p')}
-                    className={`py-2 rounded-xl font-bold border transition-all ${
+                    className={`py-2 px-1 rounded-xl font-bold border transition-all text-center ${
                       resolution === '1080p' ? 'bg-cyan-500/20 text-cyan-400 border-cyan-400' : 'bg-slate-950 text-slate-400 border-slate-800'
                     }`}
                   >
-                    1080p Full HD
+                    1080p FHD
+                    <span className="block text-[9px] font-normal text-slate-400">Full HD</span>
                   </button>
+
                   <button
                     onClick={() => setResolution('4k')}
-                    className={`py-2 rounded-xl font-bold border transition-all ${
+                    className={`py-2 px-1 rounded-xl font-bold border transition-all text-center ${
                       resolution === '4k' ? 'bg-cyan-500/20 text-cyan-400 border-cyan-400' : 'bg-slate-950 text-slate-400 border-slate-800'
                     }`}
                   >
-                    4K Ultra HD
+                    4K QHD
+                    <span className="block text-[9px] font-normal text-amber-400">High Memory</span>
                   </button>
                 </div>
               </div>
